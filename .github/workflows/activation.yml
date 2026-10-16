@@ -51,6 +51,7 @@ jobs:
           node-version: '20'
 
       - name: Auto-activate .alf -> .ulf (needs UNITY_EMAIL + UNITY_PASSWORD secrets)
+        continue-on-error: true
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
@@ -75,6 +76,18 @@ jobs:
           name: unity-ulf
           path: activation/*.ulf
           if-no-files-found: warn
+
+      - name: Upload activation debug (screenshot/log, if any)
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: unity-activation-debug
+          path: |
+            activation/error.png
+            activation/error.html
+            activation/unity-activation.log
+            activation/code.txt
+          if-no-files-found: ignore
 
       - name: Summary / next steps
         if: ${{ always() }}
