@@ -2,8 +2,9 @@ name: Build Android APK
 
 on:
   workflow_dispatch: {}
-  push:
-    branches: [ main, master ]
+  # Re-enable auto-build on push once UNITY_LICENSE secrets are configured:
+  # push:
+  #   branches: [ main, master ]
 
 jobs:
   build:
