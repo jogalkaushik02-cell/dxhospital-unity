@@ -55,11 +55,14 @@ jobs:
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_TOTP_KEY: ${{ secrets.UNITY_TOTP_KEY }}
         run: |
           npm install --global unity-license-activate
           ALF_FILE="$(basename "$(ls activation/*.alf | head -1)")"
           cd activation
-          unity-license-activate "$UNITY_EMAIL" "$UNITY_PASSWORD" "$ALF_FILE" || true
+          ARGS=()
+          if [ -n "$UNITY_TOTP_KEY" ]; then ARGS+=(--authenticator-key "$UNITY_TOTP_KEY"); fi
+          unity-license-activate "$UNITY_EMAIL" "$UNITY_PASSWORD" "$ALF_FILE" "${ARGS[@]}" || true
           ls -la
 
       - name: Upload .ulf artifact (if generated)
