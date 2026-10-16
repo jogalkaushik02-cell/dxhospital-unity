@@ -1,25 +1,95 @@
 name: Unity activation
 
-# One-time: generates an activation file (.alf) you upload to
-# https://license.unity3d.com to get a free Personal license (.ulf).
-# Run manually from the Actions tab.
+# Generates a Unity manual activation file (.alf), and - if UNITY_EMAIL and
+# UNITY_PASSWORD repo secrets are set - automatically converts it into a
+# license file (.ulf) using game-ci's unity-license-activate tool.
+#
+# The old game-ci/unity-request-activation-file@v2 action is retired, so we
+# call the Unity editor Docker image directly to create the .alf.
+#
+# Run this manually from the Actions tab.
 
 on:
   workflow_dispatch: {}
 
 jobs:
   activation:
-    name: Request activation file
+    name: Generate Unity license (.alf / .ulf)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
-      - name: Request manual activation file
-        id: getManualLicenseFile
-        uses: game-ci/unity-request-activation-file@v2
-        with:
-          unityVersion: 2022.3.76f1
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+          df -h /
 
-      - name: Upload activation file as artifact
+      - name: Generate .alf (manual activation file)
+        run: |
+          mkdir -p activation
+          docker run --rm \
+            --workdir /github/workspace \
+            --volume "$PWD:/github/workspace" \
+            unityci/editor:2022.3.76f1-base-3 \
+            /opt/unity/Editor/Unity \
+            -batchmode -nographics -quit \
+            -createManualActivationFile \
+            -logFile /github/workspace/activation/unity-activation.log || true
+          find . -name '*.alf' -print -exec cp {} activation/ \;
+          ls -la activation
+          test -n "$(ls activation/*.alf 2>/dev/null)" || { echo "::error::No .alf file was generated - see activation/unity-activation.log"; exit 1; }
+
+      - name: Upload .alf artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.getManualLicenseFile.outputs.filePath }}
-          path: ${{ steps.getManualLicenseFile.outputs.filePath }}
+          name: unity-alf
+          path: activation/*.alf
+          if-no-files-found: error
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Auto-activate .alf -> .ulf (needs UNITY_EMAIL + UNITY_PASSWORD secrets)
+        if: ${{ secrets.UNITY_EMAIL != '' && secrets.UNITY_PASSWORD != '' }}
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          npm install --global unity-license-activate
+          ALF_FILE="$(basename "$(ls activation/*.alf | head -1)")"
+          cd activation
+          unity-license-activate "$UNITY_EMAIL" "$UNITY_PASSWORD" "$ALF_FILE" || true
+          ls -la
+
+      - name: Upload .ulf artifact (if generated)
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: unity-ulf
+          path: activation/*.ulf
+          if-no-files-found: warn
+
+      - name: Summary / next steps
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Unity activation"
+            echo ""
+            if ls activation/*.ulf >/dev/null 2>&1; then
+              echo "A **.ulf** license file was generated automatically."
+              echo ""
+              echo "1. Download the **unity-ulf** artifact from this run."
+              echo "2. Open it in a text editor and copy ALL of its contents."
+              echo "3. Repo Settings > Secrets and variables > Actions > New repository secret"
+              echo "   - Name: UNITY_LICENSE  Value: <the .ulf contents>"
+              echo "4. Make sure UNITY_EMAIL and UNITY_PASSWORD are also set."
+              echo "5. Run the 'Build Android APK' workflow."
+            else
+              echo "No **.ulf** was produced (auto-activation skipped or failed)."
+              echo ""
+              echo "Option A: add UNITY_EMAIL + UNITY_PASSWORD secrets, then re-run this workflow."
+              echo "Option B: download the **unity-alf** artifact and convert it at https://license.unity3d.com/manual"
+              echo "          (choose Unity Personal; if hidden, use browser Inspect to remove 'display:none')."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
